@@ -23,8 +23,8 @@ import { amountToUiAmount } from '@solana/spl-token';
 const JUPITER_API = "https://quote-api.jup.ag/v6";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
-const SOL_SWAP_AMOUNT = 0.0003;
-const BUY_THRESHOLD = 0.31;
+const SOL_SWAP_AMOUNT = 0.003;
+const BUY_THRESHOLD = 0.01;
 const GROWTH_THRESHOLD = 0.20;
 const CMC_API_KEY = "be5863ba-45ef-430b-8e80-e2e70e80a4ae"; // put your key here
 
@@ -82,7 +82,7 @@ async function getTokenBalance(tokenMint) {
 
 
 
-const TARGET_GAIN = 0.6; // 30%
+const TARGET_GAIN = 0.30; // 30%
 
 // Store your initial prices
 let trackedPrices = new Map(); // tokenAddress => initialPrice
@@ -100,31 +100,45 @@ async function checkMyTokens() {
     const amount = Number(rawAmount) / 10 ** decimals;
 
     if (amount === 0) continue;
-    if (finishedTokens.has(tokenAddress)) continue; // skip sold tokens
+    if (finishedTokens.has(tokenAddress)) continue;
 
     const currentPrice = await getTokenPrice(tokenAddress);
     if (!currentPrice) continue;
 
     if (!trackedPrices.has(tokenAddress)) {
-      trackedPrices.set(tokenAddress, { lastPrice: currentPrice, totalGain: 0 });
+      trackedPrices.set(tokenAddress, {
+        lastPrice: currentPrice,
+        totalGain: 0,
+        buyTime: null
+      });
       console.log(`🔍 Start tracking ${tokenAddress} at $${currentPrice}`);
       continue;
     }
 
-    const { lastPrice, totalGain } = trackedPrices.get(tokenAddress);
+    let { lastPrice, totalGain, buyTime } = trackedPrices.get(tokenAddress);
     const percentGain = (currentPrice - lastPrice) / lastPrice;
     const updatedGain = totalGain + percentGain;
 
-    trackedPrices.set(tokenAddress, { lastPrice: currentPrice, totalGain: updatedGain });
+    if (!buyTime) {
+      buyTime = Date.now();
+    }
 
-    if (updatedGain >= TARGET_GAIN) {
-      console.log(`🚀 ${tokenAddress} gained ${(updatedGain * 100).toFixed(2)}%, selling...`);
+    trackedPrices.set(tokenAddress, {
+      lastPrice: currentPrice,
+      totalGain: updatedGain,
+      buyTime
+    });
+
+    const timeSinceBuy = (Date.now() - buyTime) / 1000; // in seconds
+
+    if (updatedGain >= TARGET_GAIN || timeSinceBuy > 59 * 60) {
+      console.log(`🚀 Selling ${tokenAddress}: gain ${(updatedGain * 100).toFixed(2)}% | held for ${Math.floor(timeSinceBuy / 60)} min`);
       const sold = await swapTokenForSol(tokenAddress);
 
       if (sold) {
         console.log(`✅ Sold ${tokenAddress} successfully`);
         trackedPrices.delete(tokenAddress);
-        finishedTokens.add(tokenAddress); // mark it so we never rebuy
+        finishedTokens.add(tokenAddress);
       } else {
         console.log(`❌ Sell failed for ${tokenAddress}, will retry next check`);
       }
@@ -137,7 +151,6 @@ async function checkMyTokens() {
   
   
 // Run every minute
-setInterval(checkMyTokens, 60 * 1000);
 
 
 
@@ -262,7 +275,11 @@ async function checkTrackedTokens() {
     if (!price) continue;
 
     if (!info.lastPrice) {
-      trackedTokens.set(tokenAddress, { ...info, lastPrice: price, totalGain: 0 });
+      trackedTokens.set(tokenAddress, {
+        ...info,
+        lastPrice: price,
+        totalGain: 0
+      });
       console.log(`👀 Watching ${tokenAddress} starting at $${price}`);
       continue;
     }
@@ -270,14 +287,32 @@ async function checkTrackedTokens() {
     const percentGain = (price - info.lastPrice) / info.lastPrice;
     const updatedGain = (info.totalGain || 0) + percentGain;
 
-    trackedTokens.set(tokenAddress, { ...info, lastPrice: price, totalGain: updatedGain });
+    trackedTokens.set(tokenAddress, {
+      ...info,
+      lastPrice: price,
+      totalGain: updatedGain
+    });
 
     if (updatedGain >= BUY_THRESHOLD) {
       console.log(`📈 ${tokenAddress} up ${(updatedGain * 100).toFixed(2)}%, buying…`);
       const bought = await swapSolForToken(tokenAddress);
 
       if (bought) {
-        trackedTokens.set(tokenAddress, { ...info, buyPrice: price, lastPrice: price, totalGain: 0 });
+        const now = Date.now();
+        trackedTokens.set(tokenAddress, {
+          ...info,
+          buyPrice: price,
+          lastPrice: price,
+          totalGain: 0,
+          buyTime: now
+        });
+
+        trackedPrices.set(tokenAddress, {
+          lastPrice: price,
+          totalGain: 0,
+          buyTime: now
+        });
+
         console.log(`✅ Bought ${tokenAddress} at $${price}`);
       } else {
         console.log(`❌ Buy failed for ${tokenAddress}, will retry later`);
@@ -287,6 +322,7 @@ async function checkTrackedTokens() {
     }
   }
 }
+
 
 
   
@@ -325,20 +361,20 @@ async function fetchNewSolanaTokens() {
 async function mainLoop() {
   while (true) {
     try {
-      // try to fetch new tokens and check them
-      await fetchNewSolanaTokens();
-      await checkTrackedTokens();
+      await fetchNewSolanaTokens();   // look for new tokens
+      await checkTrackedTokens();     // check if new ones should be bought
+      await checkMyTokens();          // 🔥 check if held tokens should be sold
     } catch (err) {
       console.log("⚠️ Network (or other) error:", err.message);
       console.log("⏳ Waiting 30s before retry...");
-      await sleep(30_000);      // pause on error
-      continue;                 // retry immediately
+      await sleep(30_000);
+      continue;
     }
-    // normal pause between successful iterations
     console.log("✅ Loop done, sleeping 2 min...");
-    await sleep(2 * 60_000);   // 300 000 ms
+    await sleep(2 * 60_000);
   }
 }
+
 
 // start it
 mainLoop();

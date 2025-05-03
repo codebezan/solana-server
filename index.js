@@ -23,7 +23,7 @@ import { amountToUiAmount } from '@solana/spl-token';
 const JUPITER_API = "https://quote-api.jup.ag/v6";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
-const SOL_SWAP_AMOUNT = 0.003;
+const SOL_SWAP_AMOUNT = 0.01;
 const BUY_THRESHOLD = 0.01;
 const GROWTH_THRESHOLD = 0.20;
 const CMC_API_KEY = "be5863ba-45ef-430b-8e80-e2e70e80a4ae"; // put your key here
